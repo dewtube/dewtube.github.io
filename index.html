@@ -53,8 +53,9 @@
   .msg.small{font-size:.75rem;line-height:1rem;margin-top:.75rem}
   .overlay{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:color-mix(in oklab,var(--background) 85%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:1rem}
   .overlay .inner{width:100%;max-width:64rem}
-  .overlay .bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.5rem;margin-bottom:.75rem}
-  .overlay .ctl{display:flex;flex-wrap:wrap;gap:.5rem}
+  .topBar{display:flex;justify-content:flex-end;align-items:center;gap:.5rem;margin-bottom:.5rem;min-height:38px}
+  .topBar:empty{display:none}
+  .playerWrap{position:relative}
   .frameBox{aspect-ratio:16/9;overflow:hidden;border-radius:calc(var(--radius) + 4px);border:1px solid var(--border);background:var(--muted)}
   .frameBox iframe{width:100%;height:100%;border:0;display:block}
   .field{display:flex;align-items:center;gap:.25rem;border:1px solid var(--border);background:var(--card);border-radius:calc(var(--radius) - 2px);font-size:.875rem;line-height:1.25rem;padding:.5rem 2px .5rem .75rem;outline:none;transition:border-color .15s cubic-bezier(.4,0,.2,1)}
@@ -161,15 +162,16 @@ async function openPlayer({ type, id, format = null, episodes = null }) {
   let season = 1, episode = 1, audio = 'sub';
   const overlay = document.createElement('div');
   overlay.className = 'overlay';
-  overlay.innerHTML = `<div class="inner"><div class="bar"><div class="ctl" id="ctl"></div></div><div id="frameBox" class="frameBox"></div></div>`;
+  overlay.innerHTML = `<div class="inner"><div class="topBar" id="topBar"></div><div class="playerWrap"><div id="frameBox" class="frameBox"></div></div></div>`;
   document.body.appendChild(overlay);
-  const ctl = overlay.querySelector('#ctl'), frameBox = overlay.querySelector('#frameBox');
+  const frameBox = overlay.querySelector('#frameBox');
+  const topBar = overlay.querySelector('#topBar');
   const close = () => { overlay.remove(); window.removeEventListener('keydown', onKey); };
   const onKey = e => e.key === 'Escape' && close();
   window.addEventListener('keydown', onKey);
-  overlay.addEventListener('click', close);
-  ctl.addEventListener('click', e => e.stopPropagation());
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
   frameBox.addEventListener('click', e => e.stopPropagation());
+  topBar.addEventListener('click', e => e.stopPropagation());
   const src = () =>
     type === 'anime' ? animeUrl(format, id, episode, audio)
     : type === 'movie' ? `https://vidfast.vc/movie/${id}`
@@ -183,50 +185,71 @@ async function openPlayer({ type, id, format = null, episodes = null }) {
     f.src = src();
     frameBox.appendChild(f);
   }
-  const epBox = (label, value, max, onChange) => {
+  const epBox = (label, value, onChange) => {
     const d = document.createElement('div');
     d.className = 'field';
-    d.innerHTML = `<span>${label}</span><input aria-label="${label}" type="number" min="1" step="1" ${max ? `max="${max}"` : ''}>`;
+    d.innerHTML = `<span>${label}</span><input aria-label="${label}" type="number" min="1" step="1">`;
     const i = d.querySelector('input');
     const size = () => (i.style.width = `calc(${String(i.value).length}ch + 17px)`);
     i.value = value; size();
-    i.addEventListener('input', () => { onChange(+i.value); size(); });
-    ctl.appendChild(d);
+    i.addEventListener('input', () => { onChange(Math.max(1, +i.value || 1)); size(); });
+    i.addEventListener('change', () => { i.value = Math.max(1, +i.value || 1); onChange(+i.value); size(); });
+    topBar.appendChild(d);
     return i;
   };
-  if (type === 'anime') {
-    const d = document.createElement('div');
-    d.className = 'field audioField';
-    d.innerHTML = `<div class="numWrap"><input aria-label="Audio" type="number" step="1"><span class="numLabel" aria-hidden="true"></span></div>`;
-    const i = d.querySelector('input');
-    const label = d.querySelector('.numLabel');
-    const set = () => {
-      audio = +i.value === 2 ? 'dub' : 'sub';
-      label.textContent = audio === 'sub' ? 'Sub' : 'Dub';
-      i.setAttribute('aria-valuetext', label.textContent);
+  if (type === 'tv') {
+    // Episode ONLY, above player right side. No season picker.
+    // TMDB: ONE /tv/{id} call -> seasons[] with season_number + episode_count.
+    // Global episode walks those counts: S1=10, S2=10 => 11 = S2 E1, 15 = S2 E5.
+    let seasons = [], totalEps = 0, globalEp = 1;
+    const mapGlobal = (g) => {
+      g = Math.max(1, Math.min(g || 1, totalEps || g));
+      let rest = g;
+      for (const s of seasons) { if (rest <= s.count) return { season: s.n, episode: rest, global: g }; rest -= s.count; }
+      return { season: 1, episode: g, global: g };
     };
-    const apply = () => {
-      let raw = i.value === '' ? 0 : parseInt(i.value, 10);
-      if (Number.isNaN(raw)) raw = 0;
-      const n = ((raw - 1) % 2 + 2) % 2 + 1;
-      i.value = n;
-      set();
+    const applyGlobal = (g) => {
+      const m = mapGlobal(g); globalEp = m.global; season = m.season; episode = m.episode;
+      if (topInput && +topInput.value !== globalEp) topInput.value = globalEp;
+      if (topInput) { topInput.setAttribute('max', totalEps || '');}
       loadFrame();
     };
-    i.value = audio === 'sub' ? 1 : 2;
-    set();
-    i.addEventListener('input', apply);
-    i.addEventListener('change', apply);
-    ctl.appendChild(d);
+    const d = document.createElement('div'); d.className = 'field';
+    d.innerHTML = `<span>Episode</span><input aria-label="Episode" type="number" min="1" step="1">`;
+    const topInput = d.querySelector('input'); topInput.value = 1;
+    const sizeTop = () => (topInput.style.width = `calc(${String(topInput.value).length}ch + 17px)`); sizeTop();
+    let debounce;
+    topInput.addEventListener('input', () => { sizeTop(); clearTimeout(debounce); debounce = setTimeout(() => applyGlobal(+topInput.value || 1), 350); });
+    topInput.addEventListener('change', () => { clearTimeout(debounce); applyGlobal(+topInput.value || 1); sizeTop(); });
+    topBar.appendChild(d);
+    (async () => {
+      try {
+        const details = await tmdb(`/tv/${id}`);
+        seasons = (details.seasons || []).filter(s => s.season_number > 0 && s.episode_count > 0).sort((a,b) => a.season_number - b.season_number).map(s => ({ n: s.season_number, count: s.episode_count }));
+        totalEps = seasons.reduce((a,s) => a + s.count, 0);
+      } catch(e) { console.error('[DewTube] TMDB /tv failed:', e); seasons = []; totalEps = 0; }
+      applyGlobal(globalEp);
+    })();
+  }
+  if (type === 'anime') {
+    // Sub/Dub + Episode, both above player right side.
+    const d = document.createElement('div'); d.className = 'field audioField';
+    d.innerHTML = `<div class="numWrap"><input aria-label="Audio" type="number" step="1"><span class="numLabel" aria-hidden="true"></span></div>`;
+    const i = d.querySelector('input'); const label = d.querySelector('.numLabel');
+    const set = () => { audio = +i.value === 2 ? 'dub' : 'sub'; label.textContent = audio === 'sub' ? 'Sub' : 'Dub'; i.setAttribute('aria-valuetext', label.textContent); };
+    const apply = () => { let raw = i.value === '' ? 0 : parseInt(i.value, 10); if (Number.isNaN(raw)) raw = 0; const n = ((raw - 1) % 2 + 2) % 2 + 1; i.value = n; set(); loadFrame(); };
+    i.value = 1; set(); i.addEventListener('input', apply); i.addEventListener('change', apply);
+    topBar.appendChild(d);
     if (episodes !== 1) {
-      epBox('Episode', 1, 0, v => {
-        episode = Math.max(1, v || 1);
-        loadFrame();
-      });
+      const ed = document.createElement('div'); ed.className = 'field';
+      ed.innerHTML = `<span>Episode</span><input aria-label="Episode" type="number" min="1" step="1">`;
+      const ei = ed.querySelector('input'); const sizeEp = () => (ei.style.width = `calc(${String(ei.value).length}ch + 17px)`);
+      ei.value = 1; sizeEp();
+      ei.addEventListener('input', () => { episode = Math.max(1, +ei.value || 1); sizeEp(); loadFrame(); });
+      ei.addEventListener('change', () => { ei.value = Math.max(1, +ei.value || 1); episode = +ei.value; sizeEp(); loadFrame(); });
+      topBar.appendChild(ed);
     }
   }
-  // No episode picker for VidFast (movie + tv) — VidFast has its own picker inside the player.
-  // TV defaults to S1 E1: https://vidfast.vc/tv/{id}/1/1
   loadFrame();
 }
 </script>
