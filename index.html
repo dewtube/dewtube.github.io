@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DewTube</title>
+<meta name="description" content="DewTube: a minimal, search-first way to find and watch movies and TV shows.">
+<meta property="og:title" content="DewTube — Search and stream">
+<meta property="og:description" content="A minimal, search-first way to find and watch movies and TV shows.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Roboto:wght@400;500&display=swap">
+<style>
+  :root{
+    --radius:.625rem;
+    --background:oklch(13% .005 250);
+    --foreground:oklch(98.4% .003 247.858);
+    --card:oklch(20.8% .042 265.755);
+    --muted:oklch(27.9% .041 260.031);
+    --muted-foreground:oklch(70.4% .04 256.788);
+    --border:oklch(100% 0 0/.1);
+    --primary:oklch(65% .19 250);
+  }
+  *,*::before,*::after{box-sizing:border-box;border:0 solid var(--border);margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%;line-height:1.5;font-family:Manrope,sans-serif;-webkit-tap-highlight-color:transparent}
+  body{background:var(--background);color:var(--foreground);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;min-height:100vh}
+  img,svg,video,canvas,iframe{display:block;vertical-align:middle}
+  img,video{max-width:100%;height:auto}
+  button,input,select{font:inherit;color:inherit;background:transparent;border-radius:0}
+  ::placeholder{color:color-mix(in oklab,currentColor 50%,transparent)}
+  main{min-height:100vh;padding:0 1.25rem}
+  #wrap{margin:0 auto;max-width:42rem;padding-top:30vh;transition:padding .5s cubic-bezier(.4,0,.2,1)}
+  #wrap.active{padding-top:2.5rem}
+  h1{font-family:Roboto,sans-serif;text-align:center;font-size:3rem;line-height:1;font-weight:400;letter-spacing:0}
+  .dew{color:oklch(65% .19 250)}
+  .tube{color:#fff}
+  .search{position:relative;margin-top:2rem}
+  .search .icon{position:absolute;left:1.25rem;top:50%;transform:translateY(-50%);width:1.25rem;height:1.25rem;color:var(--muted-foreground);pointer-events:none}
+  #q{width:100%;border:1px solid var(--border);background:var(--card);border-radius:9999px;padding:1rem 1.25rem 1rem 3.5rem;font-size:1.125rem;line-height:1.75;color:inherit;outline:none;transition:border-color .15s cubic-bezier(.4,0,.2,1)}
+  #q:focus{border-color:var(--primary)}
+  #results{margin:2.5rem auto 0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.25rem;max-width:72rem;padding-bottom:4rem}
+  @media(min-width:40rem){#results{grid-template-columns:repeat(3,minmax(0,1fr))}}
+  @media(min-width:48rem){#results{grid-template-columns:repeat(4,minmax(0,1fr))}}
+  @media(min-width:64rem){#results{grid-template-columns:repeat(6,minmax(0,1fr))}}
+  .card{background:transparent;border:0;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit;display:block;width:100%}
+  .card .poster{aspect-ratio:2/3;overflow:hidden;border-radius:var(--radius);background:var(--muted)}
+  .card .poster img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .3s cubic-bezier(.4,0,.2,1);transform-origin:center}
+  .card:hover .poster img{transform:scale(1.05)}
+  .card .t{margin-top:.5rem;font-size:.875rem;line-height:1.25rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .15s cubic-bezier(.4,0,.2,1)}
+  .card:hover .t{color:var(--primary)}
+  .card .s{font-size:.75rem;line-height:1rem;color:var(--muted-foreground)}
+  .msg{grid-column:1/-1;text-align:center;color:var(--muted-foreground)}
+  .msg.small{font-size:.75rem;line-height:1rem;margin-top:.75rem}
+  .overlay{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:color-mix(in oklab,var(--background) 85%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:1rem}
+  .overlay .inner{width:100%;max-width:64rem}
+  .overlay .bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.5rem;margin-bottom:.75rem}
+  .overlay .ctl{display:flex;flex-wrap:wrap;gap:.5rem}
+  .frameBox{aspect-ratio:16/9;overflow:hidden;border-radius:calc(var(--radius) + 4px);border:1px solid var(--border);background:var(--muted)}
+  .frameBox iframe{width:100%;height:100%;border:0;display:block}
+  .field{display:flex;align-items:center;gap:.25rem;border:1px solid var(--border);background:var(--card);border-radius:calc(var(--radius) - 2px);font-size:.875rem;line-height:1.25rem;padding:.5rem 2px .5rem .75rem;outline:none;transition:border-color .15s cubic-bezier(.4,0,.2,1)}
+  .field:focus-within{border-color:var(--primary)}
+  .field input[type=number]{width:auto;background:none;border:0;outline:none;color:inherit;font:inherit;line-height:1.25rem;padding:0}
+  .field input[type=number]::-webkit-inner-spin-button,.field input[type=number]::-webkit-outer-spin-button{opacity:1;height:auto;margin:0}
+  select.field{padding:.5rem .75rem;cursor:pointer}
+  select.field option{background:var(--card);color:var(--foreground)}
+  .field.audioField{gap:0}
+  .field .numWrap{position:relative;display:flex;align-items:center}
+  .field .numWrap input[type=number]{width:5ch;text-align:left;color:transparent;caret-color:transparent}
+  .field .numWrap input[type=number]::-webkit-inner-spin-button,.field .numWrap input[type=number]::-webkit-outer-spin-button{opacity:1;height:auto;margin:0}
+  .field .numLabel{position:absolute;left:0;top:50%;transform:translateY(-50%);pointer-events:none;font-size:.875rem;line-height:1.25rem}
+</style>
+</head>
+<body>
+<main>
+  <div id="wrap">
+    <h1><span class="dew">Dew</span><span class="tube">Tube</span></h1>
+    <div class="search">
+      <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+      <input id="q" autofocus autocomplete="off" placeholder="Search movies &amp; shows">
+    </div>
+  </div>
+  <section id="results"></section>
+</main>
+<script>
+const TMDB_KEY = '8baba8ab6b8bbe247645bcae7df63d0d';
+const TMDB = 'https://api.themoviedb.org/3';
+const img = (p, size = 'w342') => p ? `https://image.tmdb.org/t/p/${size}${p}` : null;
+async function tmdb(path, params = {}) {
+  const qs = new URLSearchParams({ api_key: TMDB_KEY, ...params });
+  const r = await fetch(`${TMDB}${path}?${qs}`);
+  if (!r.ok) throw new Error('TMDB request failed (' + r.status + ')');
+  return r.json();
+}
+const searchTmdb = async q =>
+  (await tmdb('/search/multi', { query: q, include_adult: 'false' }))
+    .results.filter(x => x.media_type === 'movie' || x.media_type === 'tv');
+async function searchAnilist(q) {
+  const r = await fetch('https://graphql.anilist.co', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      query: 'query($s:String){Page(perPage:12){media(search:$s,type:ANIME,isAdult:false,sort:SEARCH_MATCH){id title{english romaji} coverImage{large} seasonYear format episodes}}}',
+      variables: { s: q }
+    })
+  });
+  if (!r.ok) throw new Error('AniList request failed (' + r.status + ')');
+  return (await r.json()).data.Page.media;
+}
+const isTV = f => f === 'TV' || f === 'TV_SHORT';
+const animeUrl = (fmt, id, ep, audio) =>
+  `https://novuscloud.buzz/embed/ani/${id}/${isTV(fmt) ? ep : 1}/${audio}`;
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const $ = s => document.querySelector(s);
+const wrap = $('#wrap'), input = $('#q'), results = $('#results');
+let timer, token = 0;
+input.addEventListener('input', () => {
+  clearTimeout(timer);
+  timer = setTimeout(() => run(input.value.trim()), 350);
+});
+async function run(q) {
+  const active = q.length > 1;
+  wrap.classList.toggle('active', active);
+  if (!active) { results.innerHTML = ''; return; }
+  const my = ++token;
+  results.innerHTML = '<p class="msg">Searching…</p>';
+  const [m, a] = await Promise.allSettled([searchTmdb(q), searchAnilist(q)]);
+  if (my !== token) return;
+  const movies = m.status === 'fulfilled' ? m.value : [];
+  const anime = a.status === 'fulfilled' ? a.value : [];
+  if (m.status === 'rejected') console.error('TMDB:', m.reason);
+  if (a.status === 'rejected') console.error('AniList:', a.reason);
+  const cards = [];
+  anime.forEach(e => cards.push(card({
+    poster: e.coverImage?.large, title: e.title.english ?? e.title.romaji,
+    sub: 'Anime · ' + (e.seasonYear ?? ''),
+    open: () => openPlayer({ type: 'anime', id: e.id, format: e.format, episodes: e.episodes })
+  })));
+  movies.forEach(e => cards.push(card({
+    poster: img(e.poster_path), title: e.title ?? e.name,
+    sub: (e.media_type === 'tv' ? 'Series' : 'Movie') + ' · ' + (e.release_date ?? e.first_air_date ?? '').slice(0, 4),
+    open: () => openPlayer({ type: e.media_type, id: e.id })
+  })));
+  results.innerHTML = '';
+  cards.forEach(c => results.appendChild(c));
+  if (!cards.length) {
+    const failed = [m, a].filter(x => x.status === 'rejected').length;
+    results.insertAdjacentHTML('beforeend', `<p class="msg">${failed ? 'Could not load results — check the browser console for details.' : 'No results.'}</p>`);
+  } else {
+    if (m.status === 'rejected') results.insertAdjacentHTML('beforeend', '<p class="msg small">Movie/TV results (TMDB) failed to load.</p>');
+    if (a.status === 'rejected') results.insertAdjacentHTML('beforeend', '<p class="msg small">Anime results (AniList) failed to load.</p>');
+  }
+}
+function card({ poster, title, sub, open }) {
+  const b = document.createElement('button');
+  b.className = 'card';
+  b.innerHTML = `<div class="poster">${poster ? `<img src="${esc(poster)}" alt="" loading="lazy">` : ''}</div><p class="t">${esc(title)}</p><p class="s">${esc(sub)}</p>`;
+  b.addEventListener('click', open);
+  return b;
+}
+async function openPlayer({ type, id, format = null, episodes = null }) {
+  let season = 1, episode = 1, audio = 'sub';
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.innerHTML = `<div class="inner"><div class="bar"><div class="ctl" id="ctl"></div></div><div id="frameBox" class="frameBox"></div></div>`;
+  document.body.appendChild(overlay);
+  const ctl = overlay.querySelector('#ctl'), frameBox = overlay.querySelector('#frameBox');
+  const close = () => { overlay.remove(); window.removeEventListener('keydown', onKey); };
+  const onKey = e => e.key === 'Escape' && close();
+  window.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', close);
+  ctl.addEventListener('click', e => e.stopPropagation());
+  frameBox.addEventListener('click', e => e.stopPropagation());
+  const src = () =>
+    type === 'anime' ? animeUrl(format, id, episode, audio)
+    : type === 'movie' ? `https://vidfast.vc/movie/${id}`
+    : `https://vidfast.vc/tv/${id}/${season}/${episode}`;
+  function loadFrame() {
+    frameBox.innerHTML = '';
+    const f = document.createElement('iframe');
+    f.allowFullscreen = true;
+    f.allow = 'autoplay; fullscreen';
+    f.referrerPolicy = 'origin';
+    f.src = src();
+    frameBox.appendChild(f);
+  }
+  const epBox = (label, value, max, onChange) => {
+    const d = document.createElement('div');
+    d.className = 'field';
+    d.innerHTML = `<span>${label}</span><input aria-label="${label}" type="number" min="1" step="1" ${max ? `max="${max}"` : ''}>`;
+    const i = d.querySelector('input');
+    const size = () => (i.style.width = `calc(${String(i.value).length}ch + 17px)`);
+    i.value = value; size();
+    i.addEventListener('input', () => { onChange(+i.value); size(); });
+    ctl.appendChild(d);
+    return i;
+  };
+  if (type === 'anime') {
+    const d = document.createElement('div');
+    d.className = 'field audioField';
+    d.innerHTML = `<div class="numWrap"><input aria-label="Audio" type="number" step="1"><span class="numLabel" aria-hidden="true"></span></div>`;
+    const i = d.querySelector('input');
+    const label = d.querySelector('.numLabel');
+    const set = () => {
+      audio = +i.value === 2 ? 'dub' : 'sub';
+      label.textContent = audio === 'sub' ? 'Sub' : 'Dub';
+      i.setAttribute('aria-valuetext', label.textContent);
+    };
+    const apply = () => {
+      let raw = i.value === '' ? 0 : parseInt(i.value, 10);
+      if (Number.isNaN(raw)) raw = 0;
+      const n = ((raw - 1) % 2 + 2) % 2 + 1;
+      i.value = n;
+      set();
+      loadFrame();
+    };
+    i.value = audio === 'sub' ? 1 : 2;
+    set();
+    i.addEventListener('input', apply);
+    i.addEventListener('change', apply);
+    ctl.appendChild(d);
+    if (episodes !== 1) {
+      epBox('Episode', 1, 0, v => {
+        episode = Math.max(1, v || 1);
+        loadFrame();
+      });
+    }
+  }
+  // No episode picker for VidFast (movie + tv) — VidFast has its own picker inside the player.
+  // TV defaults to S1 E1: https://vidfast.vc/tv/{id}/1/1
+  loadFrame();
+}
+</script>
+</body>
+</html>
