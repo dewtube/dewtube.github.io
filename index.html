@@ -53,7 +53,7 @@
   .msg.small{font-size:.75rem;line-height:1rem;margin-top:.75rem}
   .overlay{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:color-mix(in oklab,var(--background) 85%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:1rem}
   .overlay .inner{width:100%;max-width:64rem}
-  .topBar{display:flex;justify-content:flex-end;align-items:center;gap:.5rem;margin-bottom:.5rem;min-height:38px}
+  .topBar{display:flex;justify-content:flex-end;align-items:center;gap:.5rem;margin-bottom:.5rem;min-height:38px;width:max-content;margin-left:auto}
   .topBar:empty{display:none}
   .playerWrap{position:relative}
   .frameBox{aspect-ratio:16/9;overflow:hidden;border-radius:calc(var(--radius) + 4px);border:1px solid var(--border);background:var(--muted)}
@@ -169,7 +169,10 @@ async function openPlayer({ type, id, format = null, episodes = null }) {
   const close = () => { overlay.remove(); window.removeEventListener('keydown', onKey); };
   const onKey = e => e.key === 'Escape' && close();
   window.addEventListener('keydown', onKey);
-  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  // Close when clicking anywhere on the overlay backdrop.
+  overlay.addEventListener('click', close);
+  // Only stop propagation on the actual player and the controls bar,
+  // NOT the whole .inner wrapper (which includes empty space above/around the player).
   frameBox.addEventListener('click', e => e.stopPropagation());
   topBar.addEventListener('click', e => e.stopPropagation());
   const src = () =>
@@ -185,42 +188,39 @@ async function openPlayer({ type, id, format = null, episodes = null }) {
     f.src = src();
     frameBox.appendChild(f);
   }
-  const epBox = (label, value, onChange) => {
-    const d = document.createElement('div');
-    d.className = 'field';
-    d.innerHTML = `<span>${label}</span><input aria-label="${label}" type="number" min="1" step="1">`;
-    const i = d.querySelector('input');
-    const size = () => (i.style.width = `calc(${String(i.value).length}ch + 17px)`);
-    i.value = value; size();
-    i.addEventListener('input', () => { onChange(Math.max(1, +i.value || 1)); size(); });
-    i.addEventListener('change', () => { i.value = Math.max(1, +i.value || 1); onChange(+i.value); size(); });
-    topBar.appendChild(d);
-    return i;
-  };
   if (type === 'tv') {
     // Episode ONLY, above player right side. No season picker.
     // TMDB: ONE /tv/{id} call -> seasons[] with season_number + episode_count.
     // Global episode walks those counts: S1=10, S2=10 => 11 = S2 E1, 15 = S2 E5.
+    // If the picked episode goes beyond TMDB's known total, season data is still
+    // used to map as far as possible, then the remainder is treated as extra
+    // episodes in the last known season (or season 1 if none known).
     let seasons = [], totalEps = 0, globalEp = 1;
     const mapGlobal = (g) => {
-      g = Math.max(1, Math.min(g || 1, totalEps || g));
+      g = Math.max(1, g || 1);
+      if (!seasons.length) return { season: 1, episode: g, global: g };
       let rest = g;
-      for (const s of seasons) { if (rest <= s.count) return { season: s.n, episode: rest, global: g }; rest -= s.count; }
-      return { season: 1, episode: g, global: g };
+      for (const s of seasons) {
+        if (rest <= s.count) return { season: s.n, episode: rest, global: g };
+        rest -= s.count;
+      }
+      // Beyond known episodes: continue in the last known season.
+      const last = seasons[seasons.length - 1];
+      return { season: last.n, episode: last.count + rest, global: g };
     };
     const applyGlobal = (g) => {
-      const m = mapGlobal(g); globalEp = m.global; season = m.season; episode = m.episode;
-      if (topInput && +topInput.value !== globalEp) topInput.value = globalEp;
-      if (topInput) { topInput.setAttribute('max', totalEps || '');}
+      // Ignore empty/invalid input entirely — keep the current episode.
+      if (g === '' || g == null || Number.isNaN(+g) || +g < 1) return;
+      const m = mapGlobal(+g); globalEp = m.global; season = m.season; episode = m.episode;
       loadFrame();
     };
     const d = document.createElement('div'); d.className = 'field';
     d.innerHTML = `<span>Episode</span><input aria-label="Episode" type="number" min="1" step="1">`;
     const topInput = d.querySelector('input'); topInput.value = 1;
-    const sizeTop = () => (topInput.style.width = `calc(${String(topInput.value).length}ch + 17px)`); sizeTop();
+    const sizeTop = () => (topInput.style.width = `calc(${String(topInput.value || '').length}ch + 17px)`); sizeTop();
     let debounce;
-    topInput.addEventListener('input', () => { sizeTop(); clearTimeout(debounce); debounce = setTimeout(() => applyGlobal(+topInput.value || 1), 350); });
-    topInput.addEventListener('change', () => { clearTimeout(debounce); applyGlobal(+topInput.value || 1); sizeTop(); });
+    topInput.addEventListener('input', () => { sizeTop(); clearTimeout(debounce); debounce = setTimeout(() => applyGlobal(topInput.value), 350); });
+    topInput.addEventListener('change', () => { clearTimeout(debounce); applyGlobal(topInput.value); sizeTop(); });
     topBar.appendChild(d);
     (async () => {
       try {
@@ -228,7 +228,8 @@ async function openPlayer({ type, id, format = null, episodes = null }) {
         seasons = (details.seasons || []).filter(s => s.season_number > 0 && s.episode_count > 0).sort((a,b) => a.season_number - b.season_number).map(s => ({ n: s.season_number, count: s.episode_count }));
         totalEps = seasons.reduce((a,s) => a + s.count, 0);
       } catch(e) { console.error('[DewTube] TMDB /tv failed:', e); seasons = []; totalEps = 0; }
-      applyGlobal(globalEp);
+      // Only re-apply if the user has actually entered a valid episode number.
+      if (topInput.value !== '' && +topInput.value >= 1) applyGlobal(topInput.value);
     })();
   }
   if (type === 'anime') {
@@ -243,10 +244,15 @@ async function openPlayer({ type, id, format = null, episodes = null }) {
     if (episodes !== 1) {
       const ed = document.createElement('div'); ed.className = 'field';
       ed.innerHTML = `<span>Episode</span><input aria-label="Episode" type="number" min="1" step="1">`;
-      const ei = ed.querySelector('input'); const sizeEp = () => (ei.style.width = `calc(${String(ei.value).length}ch + 17px)`);
+      const ei = ed.querySelector('input'); const sizeEp = () => (ei.style.width = `calc(${String(ei.value || '').length}ch + 17px)`);
       ei.value = 1; sizeEp();
-      ei.addEventListener('input', () => { episode = Math.max(1, +ei.value || 1); sizeEp(); loadFrame(); });
-      ei.addEventListener('change', () => { ei.value = Math.max(1, +ei.value || 1); episode = +ei.value; sizeEp(); loadFrame(); });
+      const applyEp = () => {
+        // Ignore empty/invalid input entirely — keep the current episode.
+        if (ei.value === '' || Number.isNaN(+ei.value) || +ei.value < 1) return;
+        episode = +ei.value; loadFrame();
+      };
+      ei.addEventListener('input', () => { sizeEp(); applyEp(); });
+      ei.addEventListener('change', () => { applyEp(); sizeEp(); });
       topBar.appendChild(ed);
     }
   }
