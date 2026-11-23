@@ -62,13 +62,6 @@
   .field:focus-within{border-color:var(--primary)}
   .field input[type=number]{width:auto;background:none;border:0;outline:none;color:inherit;font:inherit;line-height:1.25rem;padding:0}
   .field input[type=number]::-webkit-inner-spin-button,.field input[type=number]::-webkit-outer-spin-button{opacity:1;height:auto;margin:0}
-  select.field{padding:.5rem .75rem;cursor:pointer}
-  select.field option{background:var(--card);color:var(--foreground)}
-  .field.audioField{gap:0}
-  .field .numWrap{position:relative;display:flex;align-items:center}
-  .field .numWrap input[type=number]{width:5ch;text-align:left;color:transparent;caret-color:transparent}
-  .field .numWrap input[type=number]::-webkit-inner-spin-button,.field .numWrap input[type=number]::-webkit-outer-spin-button{opacity:1;height:auto;margin:0}
-  .field .numLabel{position:absolute;left:0;top:50%;transform:translateY(-50%);pointer-events:none;font-size:.875rem;line-height:1.25rem}
 </style>
 </head>
 <body>
@@ -83,179 +76,306 @@
   <section id="results"></section>
 </main>
 <script>
+/* ---------- Config & small utilities ---------- */
+
 const TMDB_KEY = '8baba8ab6b8bbe247645bcae7df63d0d';
 const TMDB = 'https://api.themoviedb.org/3';
-const img = (p, size = 'w342') => p ? `https://image.tmdb.org/t/p/${size}${p}` : null;
+const ANILIST = 'https://graphql.anilist.co';
+const ANIME_EMBED = 'https://novuscloud.buzz/embed/ani';
+
+const $ = sel => document.querySelector(sel);
+const img = (path, size = 'w342') => path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/* ---------- API clients ---------- */
+
 async function tmdb(path, params = {}) {
   const qs = new URLSearchParams({ api_key: TMDB_KEY, ...params });
-  const r = await fetch(`${TMDB}${path}?${qs}`);
-  if (!r.ok) throw new Error('TMDB request failed (' + r.status + ')');
-  return r.json();
+  const res = await fetch(`${TMDB}${path}?${qs}`);
+  if (!res.ok) throw new Error(`TMDB request failed (${res.status})`);
+  return res.json();
 }
-const searchTmdb = async q =>
-  (await tmdb('/search/multi', { query: q, include_adult: 'false' }))
+
+const searchTmdb = async query =>
+  (await tmdb('/search/multi', { query, include_adult: 'false' }))
     .results.filter(x => x.media_type === 'movie' || x.media_type === 'tv');
-async function searchAnilist(q) {
-  const r = await fetch('https://graphql.anilist.co', {
+
+async function searchAnilist(query) {
+  const res = await fetch(ANILIST, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
-      query: 'query($s:String){Page(perPage:12){media(search:$s,type:ANIME,isAdult:false,sort:SEARCH_MATCH){id title{english romaji} coverImage{large} seasonYear format episodes}}}',
-      variables: { s: q }
+      query: `query($s:String){Page(perPage:12){media(search:$s,type:ANIME,isAdult:false,sort:SEARCH_MATCH){
+        id title{english romaji} coverImage{large} seasonYear format episodes
+      }}}`,
+      variables: { s: query }
     })
   });
-  if (!r.ok) throw new Error('AniList request failed (' + r.status + ')');
-  return (await r.json()).data.Page.media;
+  if (!res.ok) throw new Error(`AniList request failed (${res.status})`);
+  return (await res.json()).data.Page.media;
 }
-const isTV = f => f === 'TV' || f === 'TV_SHORT';
-const animeUrl = (fmt, id, ep, audio) =>
-  `https://novuscloud.buzz/embed/ani/${id}/${isTV(fmt) ? ep : 1}/${audio}`;
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const $ = s => document.querySelector(s);
-const wrap = $('#wrap'), input = $('#q'), results = $('#results');
-let timer, token = 0;
+
+/* ---------- Search UI ---------- */
+
+const wrap = $('#wrap');
+const input = $('#q');
+const results = $('#results');
+let searchTimer, searchToken = 0;
+
 input.addEventListener('input', () => {
-  clearTimeout(timer);
-  timer = setTimeout(() => run(input.value.trim()), 350);
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => runSearch(input.value.trim()), 350);
 });
-async function run(q) {
-  const active = q.length > 1;
+
+async function runSearch(query) {
+  const active = query.length > 1;
   wrap.classList.toggle('active', active);
   if (!active) { results.innerHTML = ''; return; }
-  const my = ++token;
+
+  const token = ++searchToken;
   results.innerHTML = '<p class="msg">Searching…</p>';
-  const [m, a] = await Promise.allSettled([searchTmdb(q), searchAnilist(q)]);
-  if (my !== token) return;
-  const movies = m.status === 'fulfilled' ? m.value : [];
-  const anime = a.status === 'fulfilled' ? a.value : [];
-  if (m.status === 'rejected') console.error('TMDB:', m.reason);
-  if (a.status === 'rejected') console.error('AniList:', a.reason);
-  const cards = [];
-  anime.forEach(e => cards.push(card({
-    poster: e.coverImage?.large, title: e.title.english ?? e.title.romaji,
-    sub: 'Anime · ' + (e.seasonYear ?? ''),
-    open: () => openPlayer({ type: 'anime', id: e.id, format: e.format, episodes: e.episodes })
-  })));
-  movies.forEach(e => cards.push(card({
-    poster: img(e.poster_path), title: e.title ?? e.name,
-    sub: (e.media_type === 'tv' ? 'Series' : 'Movie') + ' · ' + (e.release_date ?? e.first_air_date ?? '').slice(0, 4),
-    open: () => openPlayer({ type: e.media_type, id: e.id })
-  })));
+
+  const [tmdbResult, anilistResult] = await Promise.allSettled([
+    searchTmdb(query),
+    searchAnilist(query)
+  ]);
+  if (token !== searchToken) return;
+
+  const movies = tmdbResult.status === 'fulfilled' ? tmdbResult.value : [];
+  const anime = anilistResult.status === 'fulfilled' ? anilistResult.value : [];
+  if (tmdbResult.status === 'rejected') console.error('TMDB:', tmdbResult.reason);
+  if (anilistResult.status === 'rejected') console.error('AniList:', anilistResult.reason);
+
+  const cards = [
+    ...anime.map(entry => makeCard({
+      poster: entry.coverImage?.large,
+      title: entry.title.english ?? entry.title.romaji,
+      sub: `Anime · ${entry.seasonYear ?? ''}`,
+      open: () => openPlayer({ type: 'anime', id: entry.id, format: entry.format, episodes: entry.episodes })
+    })),
+    ...movies.map(entry => makeCard({
+      poster: img(entry.poster_path),
+      title: entry.title ?? entry.name,
+      sub: `${entry.media_type === 'tv' ? 'Series' : 'Movie'} · ${(entry.release_date ?? entry.first_air_date ?? '').slice(0, 4)}`,
+      open: () => openPlayer({ type: entry.media_type, id: entry.id })
+    }))
+  ];
+
   results.innerHTML = '';
-  cards.forEach(c => results.appendChild(c));
+  cards.forEach(card => results.appendChild(card));
+
   if (!cards.length) {
-    const failed = [m, a].filter(x => x.status === 'rejected').length;
-    results.insertAdjacentHTML('beforeend', `<p class="msg">${failed ? 'Could not load results — check the browser console for details.' : 'No results.'}</p>`);
-  } else {
-    if (m.status === 'rejected') results.insertAdjacentHTML('beforeend', '<p class="msg small">Movie/TV results (TMDB) failed to load.</p>');
-    if (a.status === 'rejected') results.insertAdjacentHTML('beforeend', '<p class="msg small">Anime results (AniList) failed to load.</p>');
+    const failures = [tmdbResult, anilistResult].filter(r => r.status === 'rejected').length;
+    results.insertAdjacentHTML('beforeend',
+      `<p class="msg">${failures ? 'Could not load results — check the browser console for details.' : 'No results.'}</p>`);
+    return;
   }
+  if (tmdbResult.status === 'rejected')
+    results.insertAdjacentHTML('beforeend', '<p class="msg small">Movie/TV results (TMDB) failed to load.</p>');
+  if (anilistResult.status === 'rejected')
+    results.insertAdjacentHTML('beforeend', '<p class="msg small">Anime results (AniList) failed to load.</p>');
 }
-function card({ poster, title, sub, open }) {
-  const b = document.createElement('button');
-  b.className = 'card';
-  b.innerHTML = `<div class="poster">${poster ? `<img src="${esc(poster)}" alt="" loading="lazy">` : ''}</div><p class="t">${esc(title)}</p><p class="s">${esc(sub)}</p>`;
-  b.addEventListener('click', open);
-  return b;
+
+function makeCard({ poster, title, sub, open }) {
+  const button = document.createElement('button');
+  button.className = 'card';
+  button.innerHTML =
+    `<div class="poster">${poster ? `<img src="${esc(poster)}" alt="" loading="lazy">` : ''}</div>` +
+    `<p class="t">${esc(title)}</p>` +
+    `<p class="s">${esc(sub)}</p>`;
+  button.addEventListener('click', open);
+  return button;
 }
+
+/* ---------- Reusable number field ---------- */
+
+/**
+ * Builds a `.field` with a label and an auto-sizing number input.
+ * `wrapValue(raw)` normalizes the raw input value (may return null to reject).
+ * `onCommit(value)` runs when the value is valid.
+ */
+function makeNumberField({ label, ariaLabel, initial, wrapValue, onCommit }) {
+  const field = document.createElement('div');
+  field.className = 'field';
+  field.innerHTML = `<span>${label}</span><input aria-label="${ariaLabel}" type="number" step="1">`;
+
+  const numberInput = field.querySelector('input');
+  const resize = () => {
+    numberInput.style.width = `calc(${String(numberInput.value || '').length}ch + 17px)`;
+  };
+
+  const commit = () => {
+    const normalized = wrapValue(numberInput.value);
+    if (normalized == null) { resize(); return; }
+    numberInput.value = normalized;
+    resize();
+    onCommit(normalized);
+  };
+
+  numberInput.value = initial;
+  resize();
+  numberInput.addEventListener('input', commit);
+  numberInput.addEventListener('change', commit);
+
+  return { field, input: numberInput, resize };
+}
+
+/* ---------- Player ---------- */
+
+const isTVFormat = format => format === 'TV' || format === 'TV_SHORT';
+
+function videoUrl({ type, id, format, episode, audio, server, season }) {
+  if (type === 'anime') {
+    return `${ANIME_EMBED}/${id}/${isTVFormat(format) ? episode : 1}/${audio}`;
+  }
+  if (type === 'movie') {
+    return server === 2
+      ? `https://vidsrc.sh/embed/movie/${id}`
+      : `https://vidfast.vc/movie/${id}`;
+  }
+  return server === 2
+    ? `https://vidsrc.sh/embed/tv/${id}/${season}/${episode}`
+    : `https://vidfast.vc/tv/${id}/${season}/${episode}`;
+}
+
+/** Maps a global episode number onto TMDB season data. */
+function makeEpisodeMapper(seasons) {
+  return globalEp => {
+    const g = Math.max(1, globalEp || 1);
+    if (!seasons.length) return { season: 1, episode: g, global: g };
+
+    let remaining = g;
+    for (const season of seasons) {
+      if (remaining <= season.count) return { season: season.n, episode: remaining, global: g };
+      remaining -= season.count;
+    }
+    const last = seasons[seasons.length - 1];
+    return { season: last.n, episode: last.count + remaining, global: g };
+  };
+}
+
 async function openPlayer({ type, id, format = null, episodes = null }) {
-  let season = 1, episode = 1, audio = 'sub';
+  const state = { season: 1, episode: 1, audio: 'sub', server: 1 };
+  let seasons = [];
+
   const overlay = document.createElement('div');
   overlay.className = 'overlay';
-  overlay.innerHTML = `<div class="inner"><div class="topBar" id="topBar"></div><div class="playerWrap"><div id="frameBox" class="frameBox"></div></div></div>`;
+  overlay.innerHTML =
+    `<div class="inner">` +
+      `<div class="topBar" id="topBar"></div>` +
+      `<div class="playerWrap"><div id="frameBox" class="frameBox"></div></div>` +
+    `</div>`;
   document.body.appendChild(overlay);
+
   const frameBox = overlay.querySelector('#frameBox');
   const topBar = overlay.querySelector('#topBar');
-  const close = () => { overlay.remove(); window.removeEventListener('keydown', onKey); };
-  const onKey = e => e.key === 'Escape' && close();
+
+  const close = () => {
+    overlay.remove();
+    window.removeEventListener('keydown', onKey);
+  };
+  const onKey = event => { if (event.key === 'Escape') close(); };
+
   window.addEventListener('keydown', onKey);
-  // Close when clicking anywhere on the overlay backdrop.
   overlay.addEventListener('click', close);
-  // Only stop propagation on the actual player and the controls bar,
-  // NOT the whole .inner wrapper (which includes empty space above/around the player).
-  frameBox.addEventListener('click', e => e.stopPropagation());
-  topBar.addEventListener('click', e => e.stopPropagation());
-  const src = () =>
-    type === 'anime' ? animeUrl(format, id, episode, audio)
-    : type === 'movie' ? `https://vidfast.vc/movie/${id}`
-    : `https://vidfast.vc/tv/${id}/${season}/${episode}`;
+  frameBox.addEventListener('click', event => event.stopPropagation());
+  topBar.addEventListener('click', event => event.stopPropagation());
+
   function loadFrame() {
     frameBox.innerHTML = '';
-    const f = document.createElement('iframe');
-    f.allowFullscreen = true;
-    f.allow = 'autoplay; fullscreen';
-    f.referrerPolicy = 'origin';
-    f.src = src();
-    frameBox.appendChild(f);
+    const frame = document.createElement('iframe');
+    frame.allowFullscreen = true;
+    frame.allow = 'autoplay; fullscreen';
+    frame.referrerPolicy = 'origin';
+    frame.src = videoUrl({ type, id, format, ...state });
+    frameBox.appendChild(frame);
   }
-  if (type === 'tv') {
-    // Episode ONLY, above player right side. No season picker.
-    // TMDB: ONE /tv/{id} call -> seasons[] with season_number + episode_count.
-    // Global episode walks those counts: S1=10, S2=10 => 11 = S2 E1, 15 = S2 E5.
-    // If the picked episode goes beyond TMDB's known total, season data is still
-    // used to map as far as possible, then the remainder is treated as extra
-    // episodes in the last known season (or season 1 if none known).
-    let seasons = [], totalEps = 0, globalEp = 1;
-    const mapGlobal = (g) => {
-      g = Math.max(1, g || 1);
-      if (!seasons.length) return { season: 1, episode: g, global: g };
-      let rest = g;
-      for (const s of seasons) {
-        if (rest <= s.count) return { season: s.n, episode: rest, global: g };
-        rest -= s.count;
+
+  /* --- Server picker (movie / tv only) --- */
+  if (type === 'movie' || type === 'tv') {
+    const { field } = makeNumberField({
+      label: 'Server',
+      ariaLabel: 'Server',
+      initial: 1,
+      wrapValue: raw => {
+        if (raw === '') return null;
+        const n = parseInt(raw, 10);
+        return isNaN(n) ? 1 : ((n - 1) % 2 + 2) % 2 + 1;
+      },
+      onCommit: value => {
+        state.server = value;
+        loadFrame();
       }
-      // Beyond known episodes: continue in the last known season.
-      const last = seasons[seasons.length - 1];
-      return { season: last.n, episode: last.count + rest, global: g };
-    };
-    const applyGlobal = (g) => {
-      // Ignore empty/invalid input entirely — keep the current episode.
-      if (g === '' || g == null || Number.isNaN(+g) || +g < 1) return;
-      const m = mapGlobal(+g); globalEp = m.global; season = m.season; episode = m.episode;
+    });
+    topBar.appendChild(field);
+  }
+
+  /* --- Episode picker for TV, using TMDB season data --- */
+  if (type === 'tv') {
+    const mapGlobal = makeEpisodeMapper(seasons);
+    const applyGlobal = raw => {
+      if (raw === '' || isNaN(+raw) || +raw < 1) return;
+      const mapped = mapGlobal(+raw);
+      state.season = mapped.season;
+      state.episode = mapped.episode;
       loadFrame();
     };
-    const d = document.createElement('div'); d.className = 'field';
-    d.innerHTML = `<span>Episode</span><input aria-label="Episode" type="number" min="1" step="1">`;
-    const topInput = d.querySelector('input'); topInput.value = 1;
-    const sizeTop = () => (topInput.style.width = `calc(${String(topInput.value || '').length}ch + 17px)`); sizeTop();
-    let debounce;
-    topInput.addEventListener('input', () => { sizeTop(); clearTimeout(debounce); debounce = setTimeout(() => applyGlobal(topInput.value), 350); });
-    topInput.addEventListener('change', () => { clearTimeout(debounce); applyGlobal(topInput.value); sizeTop(); });
-    topBar.appendChild(d);
-    (async () => {
-      try {
-        const details = await tmdb(`/tv/${id}`);
-        seasons = (details.seasons || []).filter(s => s.season_number > 0 && s.episode_count > 0).sort((a,b) => a.season_number - b.season_number).map(s => ({ n: s.season_number, count: s.episode_count }));
-        totalEps = seasons.reduce((a,s) => a + s.count, 0);
-      } catch(e) { console.error('[DewTube] TMDB /tv failed:', e); seasons = []; totalEps = 0; }
-      // Only re-apply if the user has actually entered a valid episode number.
-      if (topInput.value !== '' && +topInput.value >= 1) applyGlobal(topInput.value);
-    })();
+
+    const { field, input: episodeInput } = makeNumberField({
+      label: 'Episode',
+      ariaLabel: 'Episode',
+      initial: 1,
+      wrapValue: raw => raw,
+      onCommit: applyGlobal
+    });
+    topBar.appendChild(field);
+
+    try {
+      const details = await tmdb(`/tv/${id}`);
+      seasons = (details.seasons ?? [])
+        .filter(s => s.season_number > 0 && s.episode_count > 0)
+        .sort((a, b) => a.season_number - b.season_number)
+        .map(s => ({ n: s.season_number, count: s.episode_count }));
+    } catch (error) {
+      console.error('[DewTube] TMDB /tv failed:', error);
+      seasons = [];
+    }
+    if (episodeInput.value !== '' && +episodeInput.value >= 1) applyGlobal(episodeInput.value);
   }
+
+  /* --- Audio + episode pickers for anime --- */
   if (type === 'anime') {
-    // Sub/Dub + Episode, both above player right side.
-    const d = document.createElement('div'); d.className = 'field audioField';
-    d.innerHTML = `<div class="numWrap"><input aria-label="Audio" type="number" step="1"><span class="numLabel" aria-hidden="true"></span></div>`;
-    const i = d.querySelector('input'); const label = d.querySelector('.numLabel');
-    const set = () => { audio = +i.value === 2 ? 'dub' : 'sub'; label.textContent = audio === 'sub' ? 'Sub' : 'Dub'; i.setAttribute('aria-valuetext', label.textContent); };
-    const apply = () => { let raw = i.value === '' ? 0 : parseInt(i.value, 10); if (Number.isNaN(raw)) raw = 0; const n = ((raw - 1) % 2 + 2) % 2 + 1; i.value = n; set(); loadFrame(); };
-    i.value = 1; set(); i.addEventListener('input', apply); i.addEventListener('change', apply);
-    topBar.appendChild(d);
+    const { field: audioField } = makeNumberField({
+      label: 'Audio',
+      ariaLabel: 'Audio',
+      initial: 1,
+      wrapValue: raw => {
+        if (raw === '') return null;
+        const n = parseInt(raw, 10);
+        return isNaN(n) ? 1 : ((n - 1) % 2 + 2) % 2 + 1;
+      },
+      onCommit: value => {
+        state.audio = value === 2 ? 'dub' : 'sub';
+        loadFrame();
+      }
+    });
+    topBar.appendChild(audioField);
+
     if (episodes !== 1) {
-      const ed = document.createElement('div'); ed.className = 'field';
-      ed.innerHTML = `<span>Episode</span><input aria-label="Episode" type="number" min="1" step="1">`;
-      const ei = ed.querySelector('input'); const sizeEp = () => (ei.style.width = `calc(${String(ei.value || '').length}ch + 17px)`);
-      ei.value = 1; sizeEp();
-      const applyEp = () => {
-        // Ignore empty/invalid input entirely — keep the current episode.
-        if (ei.value === '' || Number.isNaN(+ei.value) || +ei.value < 1) return;
-        episode = +ei.value; loadFrame();
-      };
-      ei.addEventListener('input', () => { sizeEp(); applyEp(); });
-      ei.addEventListener('change', () => { applyEp(); sizeEp(); });
-      topBar.appendChild(ed);
+      const { field: episodeField } = makeNumberField({
+        label: 'Episode',
+        ariaLabel: 'Episode',
+        initial: 1,
+        wrapValue: raw => raw,
+        onCommit: value => {
+          state.episode = +value;
+          loadFrame();
+        }
+      });
+      topBar.appendChild(episodeField);
     }
   }
+
   loadFrame();
 }
 </script>
