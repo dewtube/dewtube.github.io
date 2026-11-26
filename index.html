@@ -55,12 +55,14 @@
   .card .s{font-size:.75rem;line-height:1rem;color:var(--muted-foreground)}
   .msg{grid-column:1/-1;text-align:center;color:var(--muted-foreground)}
   .msg.small{font-size:.75rem;line-height:1rem;margin-top:.75rem}
-  .overlay{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:color-mix(in oklab,var(--background) 85%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:1rem}
-  .overlay .inner{width:100%;max-width:64rem}
+  .overlay{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:color-mix(in oklab,var(--background) 85%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:clamp(.5rem,2vw,1rem);overflow:auto}
+  .overlay .inner{width:100%;max-width:min(90rem,calc((100dvh - 5.5rem) * 16 / 9));margin:auto}
+  @media(max-width:48rem){.overlay{align-items:flex-start}.overlay .inner{max-width:100%}}
+  @media(max-aspect-ratio:16/9){.overlay .inner{max-width:100%}}
   .topBar{display:flex;justify-content:flex-end;align-items:center;gap:.5rem;margin-bottom:.5rem;min-height:38px;width:max-content;margin-left:auto}
   .topBar:empty{display:none}
   .playerWrap{position:relative}
-  .frameBox{aspect-ratio:16/9;overflow:hidden;border-radius:calc(var(--radius) + 4px);border:1px solid var(--border);background:var(--muted)}
+  .frameBox{aspect-ratio:16/9;width:100%;max-height:calc(100dvh - 5.5rem);overflow:hidden;border-radius:calc(var(--radius) + 4px);border:1px solid var(--border);background:var(--muted)}
   .frameBox iframe{width:100%;height:100%;border:0;display:block}
   .field{display:flex;align-items:center;gap:.25rem;border:1px solid var(--border);background:var(--card);border-radius:calc(var(--radius) - 2px);font-size:.875rem;line-height:1.25rem;padding:.5rem 2px .5rem .75rem;outline:none;transition:border-color .15s cubic-bezier(.4,0,.2,1)}
   .field:focus-within{border-color:var(--primary)}
@@ -228,18 +230,14 @@ function makeNumberField({ label, ariaLabel, initial, wrapValue, onCommit }) {
 
 const isTVFormat = format => format === 'TV' || format === 'TV_SHORT';
 
-function videoUrl({ type, id, format, episode, audio, server, season }) {
+function videoUrl({ type, id, format, episode, audio, season }) {
   if (type === 'anime') {
     return `${ANIME_EMBED}/${id}/${isTVFormat(format) ? episode : 1}/${audio}`;
   }
   if (type === 'movie') {
-    return server === 2
-      ? `https://vidsrc.sh/embed/movie/${id}`
-      : `https://vidfast.vc/movie/${id}`;
+    return `https://vidsrc.sh/embed/movie/${id}`;
   }
-  return server === 2
-    ? `https://vidsrc.sh/embed/tv/${id}/${season}/${episode}`
-    : `https://vidfast.vc/tv/${id}/${season}/${episode}`;
+  return `https://vidsrc.sh/embed/tv/${id}/${season}/${episode}`;
 }
 
 /** Maps a global episode number onto TMDB season data. */
@@ -259,7 +257,7 @@ function makeEpisodeMapper(seasons) {
 }
 
 async function openPlayer({ type, id, format = null, episodes = null }) {
-  const state = { season: 1, episode: 1, audio: 'sub', server: 1 };
+  const state = { season: 1, episode: 1, audio: 'sub' };
   let seasons = [];
 
   const overlay = document.createElement('div');
@@ -293,25 +291,6 @@ async function openPlayer({ type, id, format = null, episodes = null }) {
     frame.referrerPolicy = 'origin';
     frame.src = videoUrl({ type, id, format, ...state });
     frameBox.appendChild(frame);
-  }
-
-  /* --- Server picker (movie / tv only) --- */
-  if (type === 'movie' || type === 'tv') {
-    const { field } = makeNumberField({
-      label: 'Server',
-      ariaLabel: 'Server',
-      initial: 1,
-      wrapValue: raw => {
-        if (raw === '') return null;
-        const n = parseInt(raw, 10);
-        return isNaN(n) ? 1 : ((n - 1) % 2 + 2) % 2 + 1;
-      },
-      onCommit: value => {
-        state.server = value;
-        loadFrame();
-      }
-    });
-    topBar.appendChild(field);
   }
 
   /* --- Episode picker for TV, using TMDB season data --- */
